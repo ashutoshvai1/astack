@@ -1,4 +1,4 @@
 interface:
   display_name: "Estimate Time"
-  short_description: "Estimate running job and goal completion"
-  default_prompt: "Use $estimate-time to estimate when the active job and ongoing goal will finish."
+  short_description: "Estimate research job and workflow completion"
+  default_prompt: "Use $estimate-time to estimate when this research job will finish and whether monitoring can pause."

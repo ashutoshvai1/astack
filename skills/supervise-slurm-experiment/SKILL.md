@@ -1,133 +1,82 @@
 ---
 name: supervise-slurm-experiment
-description: Supervise a vd2moe Slurm experiment with passive ten-minute heartbeats, evidence-aware recovery, and gated continuation. Use for an authorized experiment's execution or a bounded status request.
+description: Supervise research experiments on Slurm with passive heartbeats, evidence-aware recovery, and gated continuation. Use for authorized execution or a bounded Slurm status request.
 ---
 
 # Supervise Slurm Experiment
 
-This skill follows the vd2moe experiment protocol. Resolve repository paths
-against the experiment-owning checkout, including when installed from astack.
+Work in the experiment-owning project. Read its `AGENTS.md`, linked current
+state and experiment record, and execution/environment instructions. Derive
+paths, account, resources, launcher, tracker, and evidence rules there. This skill
+requires Slurm; it does not prescribe a cluster, research domain, or codebase.
 
-## Establish ownership and authorization
+## Establish ownership and scope
 
-Read `AGENTS.md`, `devlog/current.md`, `devlog/decisions.md`, the target experiment
-YAML, and `docs/lumi.md` plus any experiment-specific environment override.
-Follow active-work links to an owning worktree before inspecting or changing its
-records. Check `git status --short --branch` and preserve unrelated changes.
+Resolve experiment and logical-run identities, job attempts, dependency chain,
+frozen inputs, gates, and remaining resource/retry/evaluation allowances. Use
+records and submission receipts; timestamps alone do not establish ownership.
+Ask about ambiguous identities before acting. Preserve unrelated work.
 
-Resolve the experiment ID, logical runs, scheduler attempts, submitted dependency
-chain, frozen config, split-access allowance, and agreed resource/retry budget.
-Use records, submission receipts, and logs; timestamps alone do not establish
-ownership. If several experiments remain plausible, ask which one before acting.
+A one-time status/ETA request is read-only and ends after its snapshot. For
+supervision, continue already-authorized phases and recovery when prerequisites
+pass, without requesting the same approval again. Do not infer permission for
+cancellation, a changed recipe, larger allocations, or additional final accesses.
+Inspect the actual launcher and its supported phases/arguments before submission.
 
-Distinguish a one-time status/ETA request from authorization to supervise and
-continue execution. A status request is read-only and ends after its snapshot.
-For supervision, carry out already-authorized submissions, recovery, and next
-phases when their frozen prerequisites pass; do not ask for the same approval
-again. Skill invocation alone does not authorize cancellation, changed training
-recipes, larger allocations, extra trials, or additional final-split access.
+## Monitor passively
 
-Inspect the owning checkout's existing `scripts/slurm/` wrapper and underlying
-entrypoint before any submission or repair. Confirm their supported phases,
-environment, paths, and flags; wrappers can hard-code historical experiment IDs.
-Use the documented Slurm account and GPU allocation. GPU work never runs on a
-login node. Missing preflight decisions must be resolved before dependent work.
+Take one initial bounded snapshot, then one every ten minutes while the job
+progresses independently, unless the user or project specifies another cadence.
+Read sooner only for an imminent transition, detected failure, or explicit
+request. Use interruptible passive waits within tool limits; shorter wait calls
+must not trigger extra scheduler/log reads. Avoid continuous polling and log tails.
 
-## Take bounded heartbeats
+- Query known job IDs with bounded `squeue` output for state, elapsed time,
+  dependencies, and pending reason. Use `sacct` for terminal or disappeared jobs;
+  disappearance from the queue is not proof of completion.
+- Read a small relevant stdout/stderr tail and available structured progress or
+  gate output. Reuse that snapshot for ETA; separate queue delay and runtime,
+  and report `unknown` when the evidence is insufficient.
+- Give a compact update: snapshot time, phase/progress, next gate or blocker,
+  next action, and next heartbeat time. Keep the agent responsive to new input.
 
-Take one initial snapshot, then one snapshot per ten minutes while a long-running
-job progresses independently. Poll sooner only for an imminent transition,
-detected failure, or explicit user request; identify the reason for that exception.
-Use an interruptible passive wait within the harness's wait limits. Shorter wait
-calls must not cause extra scheduler/log reads. Do not use shell sleep/poll loops,
-`watch`, `tail -f`, or continuously poll an execution cell for unchanged output.
+State whether jobs progress without the agent and which transitions still need
+orchestration. Do not imply monitoring continues after the session ends.
 
-Bound each snapshot to the evidence needed for the next decision:
+## Recover and advance
 
-- Query the known job IDs with bounded `squeue` output for state, elapsed time,
-  pending reason, and dependencies. Use bounded `sacct` output for terminal or
-  disappeared jobs; disappearance from `squeue` does not establish completion.
-- Read a small relevant tail of those attempts' stdout/stderr and the latest
-  structured progress or gate artifact. Use exact paths under the experiment ID.
-- Note the snapshot time, phase/step progress, next gate, and next admissible
-  action. Scheduler failure, artifact availability, and scientific outcome are
-  separate observations.
+For blocked dependencies, inspect the predecessor's terminal state and evidence.
+`afterok` establishes exit success, not scientific success. Correct the actual
+failure within authorization; never remove a dependency to bypass a failed gate.
 
-Estimate a broad remaining-runtime range from observed progress or a comparable
-run. Separate queue delay, runtime, and any remaining dependent phases; walltime
-limits are not ETAs. Say `unknown` when progress provides no defensible estimate.
-An installed `estimate-time` skill can assist using this same snapshot; otherwise
-apply these rules directly without additional polling.
-
-Keep the user update compact and give the next heartbeat time. Respond to new
-user input while waiting. Do not imply monitoring continues after the session
-ends; identify any later phase that needs the agent to submit or inspect it.
-
-## Recover only admissible attempts
-
-For `DependencyNeverSatisfied` or another blocked chain, inspect the predecessor's
-terminal state and evidence. Scheduler `afterok` dependencies establish exit
-success, not scientific gate success. Preserve downstream scientific guards.
-Repair/resubmit a dependency only within existing authorization after resolving
-the actual failure; do not drop its dependency or bypass a failed gate to run it.
-
-Classify an invalid attempt using the repository's supported values:
-`infrastructure`, `interrupted`, `protocol`, or `implementation`, with a concrete
-reason. Verify admissibility before replacement: unchanged experiment, seed,
-phase/split, and execution-input hash, with no valid gate consuming its evidence.
-A decision-only config correction is allowed only if it cannot change evaluated
-tensors or metrics. A changed recipe belongs to a newly scoped experiment.
-Never replace valid unfavorable metrics or a valid failed scientific gate.
-
-Use the existing entrypoint's explicit replacement option and class/reason fields.
-For example, ToMoE/D2DMoE wrappers support `REPLACE_INVALID_ATTEMPT`,
-`REPLACEMENT_CLASS`, and `REPLACEMENT_REASON`; confirm current phase support before
-using them. These options do not establish that a retry is scientifically valid.
-
-For exact resume, verify that the source checkpoint is a checksum-bound artifact
-owned by the accepted logical run and that the entrypoint restores the required
-training state. Retain each contributing segment's attempt, step range, and
-resume-source checksum as trajectory provenance. Do not classify contributing
-segments as discarded retries. Inspect actual resume support; a generic restart
-or weights-only load is not an exact continuation.
-
-Publish through the existing lifecycle entrypoint using `src/vd2moe/records.py`
-(`begin_run_record`, `commit_run_evidence`). Preserve locked identity revalidation
-and the fail-closed transaction marker. Do not independently edit accepted run,
-manifest, or MLflow inventories or clear markers to force acceptance.
-`scripts/experiments/record_invalid_replacement.py` records bounded metadata for
-a terminated provisional attempt; it does not publish replacement evidence.
-Retain all consumed final-split accesses, including invalid/terminated attempts.
+Distinguish infrastructure, interruption, protocol, or implementation failure
+from a valid unfavorable result. Use the project's replacement rules and reason
+codes. Preserve logical-run identity for an admissible retry, prior evaluation
+accesses, and evidence already consumed by valid gates. A changed recipe requires
+new scientific lineage; a valid failed gate is not a replaceable attempt.
 
 Before retrying, establish that the cause is resolved and the retry fits the
-remaining agreed budget. Stop dependent actions for unresolved repeated failure,
-unsupported safe resume/publication, exhausted budget, or needed scope changes;
-report the specific blocker and ask only for the missing decision/authorization.
-Do not enter an unbounded retry loop or silently cancel existing jobs.
+remaining budget. For exact resume, verify source artifact identity and restored
+execution state; retain contributing attempts, progress ranges, and source
+checksums as trajectory provenance. A partial state restore is not an exact resume.
+Stop dependent actions for unresolved repeated failure, exhausted allowances, or
+unsupported recovery. Ask only for the missing decision; avoid unbounded retries.
 
-## Evaluate completion and reconcile evidence
+Use the project's supported publication workflow to keep run, artifact, and
+tracker inventories consistent. Honor its locking/transaction protections; do
+not clear incomplete markers or hand-edit accepted evidence to force acceptance.
+Advance only after checking scientific gates and remaining allowances separately
+from scheduler success. Preserve valid failures and final-evaluation boundaries.
 
-On termination, check the frozen scientific gate and evidence independently of
-Slurm's exit status. Continue an authorized next phase only when the required
-checksum-bound gate, provenance, and remaining split-access allowance all permit
-it. Preserve valid failed gates as outcomes; do not tune against final-split data.
+## Close the experiment
 
-Use `log-experiment` if installed and applicable. Otherwise reconcile the YAML's
-status/decision, accepted logical runs, immutable artifact manifest, and MLflow
-parent/child linkage through the existing publication entrypoint. Update
-`devlog/current.md` only for changed live state, blockers, or continuation; follow
-`AGENTS.md` for any synthesis updates and avoid per-heartbeat Markdown inventories.
-
-Load the documented environment and validate changed evidence with
-`scripts/validation/check_experiment_records.py --require-existing-artifacts` and
-`scripts/validation/check_artifact_manifest.py --require-existing`, passing the
-target record/manifest and required registry/experiment arguments. Inspect their
-current CLI if needed. Regenerate discovery with
-`python scripts/experiments/render_experiment_index.py` after record edits, then
-run it with `--check`; use only `--check` for an audit.
-Run `python scripts/validation/check_devlog.py` for devlog edits and `git diff --check`.
-Unavailable artifacts mean incomplete validation, not structure-only success.
-
-Report the experiment outcome, checks, remaining blocker or next authorized
-action, and rough ETA if still running. Keep routing quality, analytical selected
-expert cost, actual execution, and measured deployment benefit distinct.
+Reconcile the outcome with its canonical experiment/run/artifact records and
+tracker, including source provenance and failed decisions. Use an installed
+logging skill if appropriate, otherwise follow `AGENTS.md` directly. Validate
+actual artifact existence, checksums, and ownership using the project's checks;
+missing evidence means incomplete validation. Refresh discovery when required.
+Update the live devlog for changed state, durable decisions in their designated
+record, and campaign synthesis only when the interpretation changes. Keep raw
+logs in their designated store, not per-heartbeat prose. Report the outcome,
+validation limits, and remaining authorized action; distinguish measured results
+from estimates and claims the experiment did not test.
