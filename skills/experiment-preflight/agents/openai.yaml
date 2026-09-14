@@ -1,0 +1,6 @@
+interface:
+  display_name: "Experiment Preflight"
+  short_description: "Finalize experiment scope, gates, and launch readiness"
+  default_prompt: "Use $experiment-preflight to assess this experiment, ask me about unresolved scope and gates, and prepare its launch."
+policy:
+  allow_implicit_invocation: false

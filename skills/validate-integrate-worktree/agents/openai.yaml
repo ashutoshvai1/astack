@@ -1,0 +1,6 @@
+interface:
+  display_name: "Validate and Integrate Worktree"
+  short_description: "Validate evidence and integrate scoped worktrees"
+  default_prompt: "Use $validate-integrate-worktree to validate this scoped vd2moe branch and complete the integration already authorized."
+policy:
+  allow_implicit_invocation: false

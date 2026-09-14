@@ -1,0 +1,6 @@
+interface:
+  display_name: "Supervise Slurm Experiment"
+  short_description: "Supervise vd2moe jobs with sparse status checks"
+  default_prompt: "Use $supervise-slurm-experiment to supervise this vd2moe experiment and continue its authorized phases when frozen gates permit."
+policy:
+  allow_implicit_invocation: false
