@@ -26,12 +26,13 @@ any particular research repository or model framework.
 | --- | --- |
 | [`experiment-preflight`](skills/experiment-preflight/SKILL.md) | Resolve scope, controls, budgets, and gates through questions; prepare a reproducible experiment. |
 | [`supervise-slurm-experiment`](skills/supervise-slurm-experiment/SKILL.md) | Supervise Slurm jobs with passive heartbeats, bounded recovery, and scientific gate checks. |
+| [`log-experiment`](skills/log-experiment/SKILL.md) | Interpret results or failures, reconcile evidence, and update relevant devlog synthesis. |
 | [`estimate-time`](skills/estimate-time/SKILL.md) | Get a quick ETA and decide whether monitoring can pause. |
 | [`validate-integrate-worktree`](skills/validate-integrate-worktree/SKILL.md) | Validate scoped code and evidence, then complete requested integration. |
 
 For example: `$experiment-preflight assess this hypothesis and ask me about
 unresolved scope and gates before preparing the experiment.` The preparation,
-supervision, and integration skills require explicit invocation; `estimate-time`
+supervision, logging, and integration skills require explicit invocation; `estimate-time`
 also supports automatic selection. Only the Slurm skill requires Slurm.
 
 ## Research style

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Log Experiment"
+  short_description: "Reconcile research evidence and synthesize results"
+  default_prompt: "Use $log-experiment to analyze this experiment and update its canonical records and relevant devlog synthesis."
+policy:
+  allow_implicit_invocation: false
