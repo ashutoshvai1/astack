@@ -71,7 +71,18 @@ including artifact existence and identity. Update canonical records and discover
 as documented. Update the live devlog only for changed state or continuation;
 keep detailed run evidence in its designated records, not duplicated prose.
 
+For authorized CPU checks, [scripts/run_logged_command.py](scripts/run_logged_command.py)
+keeps complete output in a new log and returns exit status, duration, and a bounded
+failure tail. Use `--help` for options; supply the project's documented environment
+with `--env-script` when needed. Pass literal arguments after `--`. Allow a suitable
+initial tool wait (for example 30 seconds) instead of repeated one-second polls.
+The helper grants no execution permission and does not select CPU/GPU resources.
+Its `passed` status means exit code zero; scientific gates need separate checks.
+
 Report the settled scope and gates, checks, unresolved prerequisites, and exact
 next commands. Continue already-authorized execution when prerequisites pass.
 If additional permission is required, finish the reviewable preparation first
 and ask only for the remaining action. Readiness is not a passed scientific gate.
+For continued Slurm work, carry job identities, the last snapshot, and its next
+heartbeat deadline into supervision. Use `supervise-slurm-experiment` when invoked;
+preserve existing invocation policy rather than assuming it loads automatically.

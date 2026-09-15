@@ -1,0 +1,4 @@
+interface:
+  display_name: "Audit Codex Session"
+  short_description: "Find session token savings in skills and helpers"
+  default_prompt: "Use $audit-codex-session to analyze this session and propose the most obvious skill or helper improvements to token usage."
