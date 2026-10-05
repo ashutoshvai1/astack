@@ -3,6 +3,10 @@
 Reusable agent skills for hypothesis-driven research: explicit experiments,
 reproducible evidence, detailed run records, and concise devlog synthesis.
 
+astack is inspired by [pstack](https://github.com/cursor/plugins/tree/main/pstack).
+We regard pstack as a rigorously tested and effective reference for agent
+workflows; its author reports using these skills daily to ship code at Cursor.
+
 Your project's `AGENTS.md` defines the research goal and operating contract.
 These skills use it to discover record layouts, environments, trackers,
 launchers, validation commands, and evaluation rules. They are independent of
@@ -70,6 +74,14 @@ Native interruptible deadline suspension requires runtime support; skill
 instructions alone cannot remove model turns imposed by bounded waits.
 
 Focused helper checks: `python -m pytest -q tests` (requires pytest).
+
+## Developing skills
+
+Before implementing a new astack skill, skim any relevant
+[pstack skills and playbooks](https://github.com/cursor/plugins/tree/main/pstack/skills)
+for reference and inspiration. Consult its skill-authoring and evaluation
+guidance where applicable, then adapt the ideas to astack's research workflows
+and validate the resulting skill. Keep project-specific rules in `AGENTS.md`.
 
 ## Research style
 
