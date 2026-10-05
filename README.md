@@ -48,7 +48,9 @@ its inputs and examples.
   heartbeat deadline and can be reused by `estimate-time` without another query.
 - `experiment-preflight/scripts/run_logged_command.py` runs an authorized
   command once, keeps complete output in a new log, and reports status plus a
-  bounded failure tail. Supply a trusted project environment with `--env-script`
+  bounded failure tail. Add `--show-tail` for a bounded success preview;
+  `output_bytes` and `tail_truncated` identify output size and partial views.
+  Supply a trusted project environment with `--env-script`
   when needed; pass literal arguments after `--`. It grants no execution or
   resource authorization; `passed` means command exit zero, not a scientific gate.
 - `audit-codex-session/scripts/audit_session.py` summarizes recorded token usage
@@ -59,6 +61,13 @@ Use explicit supervision invocation in launch/resume requests. Preserve the
 heartbeat deadline through short waits and follow the active runtime's waiting
 and communication rules. These skills do not override a higher-priority wait
 limit or start unattended polling services.
+
+Default to a 30-second initial CPU-command wait (`yield_time_ms: 30000`) and
+30–60-second waits on its existing session when permitted. Keep combined tool
+output around 2,000–4,000 tokens unless a larger review is necessary; inspect
+selected sections/fields and use complete logs for potentially large output.
+Native interruptible deadline suspension requires runtime support; skill
+instructions alone cannot remove model turns imposed by bounded waits.
 
 Focused helper checks: `python -m pytest -q tests` (requires pytest).
 

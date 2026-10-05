@@ -16,7 +16,8 @@ def bounded_tail(path, byte_limit, line_limit):
         size = stream.tell()
         stream.seek(max(0, size - byte_limit))
         data = stream.read(byte_limit)
-    return "\n".join(data.decode("utf-8", errors="replace").splitlines()[-line_limit:])
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    return "\n".join(lines[-line_limit:]), size > len(data) or len(lines) > line_limit
 
 
 def main(argv=None):
@@ -28,6 +29,8 @@ def main(argv=None):
                         help="Explicit trusted Bash environment setup; relative to cwd")
     parser.add_argument("--tail-bytes", type=int, default=4096)
     parser.add_argument("--tail-lines", type=int, default=20)
+    parser.add_argument("--show-tail", action="store_true",
+                        help="Include a bounded output tail on success; failures always include a tail")
     parser.add_argument("command", nargs=argparse.REMAINDER,
                         help="Command and literal arguments after --; no shell expansion")
     args = parser.parse_args(argv)
@@ -64,9 +67,12 @@ def main(argv=None):
         return 2
     code = code if code >= 0 else 128 - code
     summary = {"status": "passed" if code == 0 else "failed", "exit_code": code,
-               "elapsed_seconds": round(time.monotonic() - started, 3), "log": str(log)}
-    if code:
-        summary["error_tail"] = bounded_tail(log, args.tail_bytes, args.tail_lines)
+               "elapsed_seconds": round(time.monotonic() - started, 3), "log": str(log),
+               "output_bytes": log.stat().st_size}
+    if code or args.show_tail:
+        tail, truncated = bounded_tail(log, args.tail_bytes, args.tail_lines)
+        summary["error_tail" if code else "output_tail"] = tail
+        summary["tail_truncated"] = truncated
     print(json.dumps(summary, ensure_ascii=True))
     return code
 

@@ -71,13 +71,27 @@ including artifact existence and identity. Update canonical records and discover
 as documented. Update the live devlog only for changed state or continuation;
 keep detailed run evidence in its designated records, not duplicated prose.
 
-For authorized CPU checks, [scripts/run_logged_command.py](scripts/run_logged_command.py)
-keeps complete output in a new log and returns exit status, duration, and a bounded
-failure tail. Use `--help` for options; supply the project's documented environment
-with `--env-script` when needed. Pass literal arguments after `--`. Allow a suitable
-initial tool wait (for example 30 seconds) instead of repeated one-second polls.
-The helper grants no execution permission and does not select CPU/GPU resources.
-Its `passed` status means exit code zero; scientific gates need separate checks.
+## Bound reads, output and waits
+
+Read required context, then use targeted `rg`, line ranges or selected JSON fields
+for follow-ups. Avoid whole-file dumps of large records, manifests, traces or
+generated assets. Budget the combined output of a tool batch, not just each child
+call; use about 2,000–4,000 tokens unless a larger review is necessary.
+
+For commands with potentially large output, use
+[scripts/run_logged_command.py](scripts/run_logged_command.py): it retains a new
+complete log and reports exit status, duration and output bytes. Failures include
+a bounded tail; add `--show-tail` for a successful read/search preview. Tail bounds
+default to 4,096 bytes/20 lines and `tail_truncated` identifies an incomplete view.
+Inspect relevant log ranges when needed instead of rerunning the command or
+printing the whole log. Supply the documented environment with `--env-script`
+and pass literal arguments after `--`. Exit zero is not a scientific gate.
+
+For CPU commands via `exec_command`, default to `yield_time_ms: 30000`. If it
+returns a running session, wait on that same session with `write_stdin` and
+`yield_time_ms: 30000` (up to 60000 when useful and permitted). Avoid repeated
+one-second polls or relaunches. Respect shorter runtime limits, user interruptions
+and required communication; the helper grants no execution or resource permission.
 
 Report the settled scope and gates, checks, unresolved prerequisites, and exact
 next commands. Continue already-authorized execution when prerequisites pass.

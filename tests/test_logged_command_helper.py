@@ -34,7 +34,44 @@ def test_failure_preserves_exit_and_bounds_tail(tmp_path):
     assert result.returncode == summary["exit_code"] == 7
     assert len(summary["error_tail"]) <= 100
     assert summary["error_tail"].endswith("failure detail")
+    assert summary["tail_truncated"] is True
     assert (tmp_path / "command.log").stat().st_size > 9000
+
+
+def test_success_preview_is_opt_in_and_keeps_complete_log(tmp_path):
+    result = run_helper(tmp_path, [sys.executable, "-c",
+                        "print('payload' * 20000); print('last line')"],
+                        "--show-tail", "--tail-bytes", "100", "--tail-lines", "1")
+    summary = json.loads(result.stdout)
+    assert result.returncode == 0
+    assert summary["output_tail"] == "last line"
+    assert summary["tail_truncated"] is True
+    assert summary["output_bytes"] == (tmp_path / "command.log").stat().st_size
+    assert summary["output_bytes"] > 100000
+    assert len(result.stdout) < 500
+    assert "error_tail" not in summary
+
+
+def test_success_preview_reports_line_truncation(tmp_path):
+    result = run_helper(tmp_path, [sys.executable, "-c", "print('first\\nsecond\\nthird')"],
+                        "--show-tail", "--tail-lines", "2")
+    summary = json.loads(result.stdout)
+    assert summary["output_tail"] == "second\nthird"
+    assert summary["tail_truncated"] is True
+
+
+def test_success_preview_reports_complete_short_output(tmp_path):
+    result = run_helper(tmp_path, [sys.executable, "-c", "print('complete')"], "--show-tail")
+    summary = json.loads(result.stdout)
+    assert summary["output_tail"] == "complete"
+    assert summary["tail_truncated"] is False
+
+
+def test_success_without_preview_omits_tail(tmp_path):
+    result = run_helper(tmp_path, [sys.executable, "-c", "print('keep in log')"])
+    summary = json.loads(result.stdout)
+    assert "output_tail" not in summary
+    assert "tail_truncated" not in summary
 
 
 def test_environment_setup_preserves_literal_arguments_and_cwd(tmp_path):

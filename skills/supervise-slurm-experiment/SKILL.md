@@ -19,6 +19,14 @@ already-authorized work without fresh approval.
   override those limits. Check early only for an imminent transition, detected
   failure, or explicit request, retaining that reason. At the deadline, take
   one snapshot and set the next deadline from it.
+- **Wait efficiently:** For CPU preparation/check commands, use a 30-second
+  initial `exec_command` wait (`yield_time_ms: 30000`), then 30–60-second
+  `write_stdin` waits on its existing session when permitted. For heartbeat
+  waits, prefer a native interruptible deadline wait only if the runtime exposes
+  one within governing limits. Otherwise retain the deadline across permitted
+  short waits; their return is not a reason to read status or recalculate time.
+  A skill cannot eliminate model turns imposed by the runtime. Do not emulate
+  suspension with an unattended polling service or override wait limits.
 - **Recover:** Inspect the failed predecessor and actual launcher. Retry only
   admissible operational failures after resolving their cause, within project
   replacement rules and remaining budget. Preserve logical-run identity,
