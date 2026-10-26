@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Bounded, read-only metrics for Codex rollout JSONL; Python 3.6+ stdlib."""
+"""Bounded, read-only metrics for Codex or Claude Code JSONL; Python 3.6+ stdlib."""
 
 import argparse
 from collections import Counter, defaultdict
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -60,7 +61,28 @@ def metadata(path):
     return row["payload"]
 
 
-def find_session(session, sessions_dir):
+def claude_projects_dir():
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude"))) / "projects"
+
+
+def detect_format(path):
+    # Claude may start with housekeeping rows rather than a user message.
+    with path.open(encoding="utf-8") as handle:
+        for raw in handle:
+            try:
+                row = json.loads(raw)
+            except ValueError:
+                continue
+            if not isinstance(row, dict):
+                continue
+            if row.get("type") == "session_meta":
+                return "codex"
+            if row.get("sessionId") or row.get("type") in ("user", "assistant", "summary", "file-history-snapshot"):
+                return "claude_code"
+    raise ValueError("{}: unrecognized session format".format(path))
+
+
+def find_session(session, sessions_dir, projects_dir=None):
     path = Path(session).expanduser()
     if path.is_file():
         return path.resolve()
@@ -74,6 +96,9 @@ def find_session(session, sessions_dir):
                     matches.append(candidate)
             except (OSError, ValueError):
                 continue
+    projects_dir = projects_dir if projects_dir is not None else claude_projects_dir()
+    matches.extend(p for p in sorted(projects_dir.rglob("*.jsonl")) if p.stem == session)
+    matches = sorted(set(p.resolve() for p in matches))
     if len(matches) != 1:
         raise ValueError("Session matched {} files; supply an exact path".format(len(matches)))
     return matches[0].resolve()
@@ -82,6 +107,11 @@ def find_session(session, sessions_dir):
 def select_paths(root, sessions_dir, children):
     if children == "none":
         return [root]
+    if detect_format(root) == "claude_code":
+        directory = root.with_suffix("")
+        candidates = (directory.glob("subagents/agent-*.jsonl") if children == "direct"
+                      else (p for p in directory.rglob("agent-*.jsonl") if p.parent.name == "subagents"))
+        return [root] + sorted(candidates)
     selected = {metadata(root)["id"]: root}
     candidates = []
     for path in sorted(sessions_dir.rglob("*.jsonl")):
@@ -125,6 +155,153 @@ def action(name, arguments):
 
 
 def analyze(path):
+    if detect_format(path) == "claude_code":
+        return analyze_claude(path)
+    return analyze_codex(path)
+
+
+def claude_action(name, inputs):
+    arguments = json.dumps(inputs, sort_keys=True)
+    if name in ("Monitor", "ScheduleWakeup", "TaskOutput"):
+        return "process_poll"
+    if name == "Bash" and re.search(r"\bsleep\s+", inputs.get("command", "")):
+        return "sleep"
+    category, _ = action(name, arguments)
+    if category != "other_tool":
+        return category
+    return {"Read": "read", "Edit": "edit", "Write": "edit", "Grep": "search",
+            "Glob": "search", "Agent": "subagent", "Task": "subagent", "Skill": "skill"}.get(name, category)
+
+
+def claude_usage(raw):
+    fresh = max(0, int(raw.get("input_tokens", 0)))
+    created = max(0, int(raw.get("cache_creation_input_tokens", 0)))
+    cached = max(0, int(raw.get("cache_read_input_tokens", 0)))
+    output = max(0, int(raw.get("output_tokens", 0)))
+    return dict(input_tokens=fresh + created + cached, cached_input_tokens=cached,
+                cache_creation_input_tokens=created, uncached_input_tokens=fresh + created,
+                output_tokens=output, total_tokens=fresh + created + cached + output)
+
+
+def analyze_claude(path):
+    # Retain metadata and hashes only; never retain message/thinking text or tool inputs.
+    records, calls, commands = {}, {}, {}
+    tools, categories = Counter(), Counter()
+    outputs, compactions, skill_reads = [], [], []
+    identity, malformed = path.stem, 0
+    with path.open(encoding="utf-8") as handle:
+        for line, raw in enumerate(handle, 1):
+            try:
+                row = json.loads(raw)
+            except ValueError:
+                malformed += 1
+                continue
+            if not isinstance(row, dict):
+                malformed += 1
+                continue
+            if row.get("sessionId") and not path.stem.startswith("agent-"):
+                identity = row["sessionId"]
+            message = row.get("message") or {}
+            if not isinstance(message, dict):
+                message = {}
+            content = message.get("content", [])
+            if row.get("type") == "summary" or row.get("isCompactSummary"):
+                compactions.append({"line": line, "response_id": None, "owned_usage": False,
+                                    "summary_chars": len(plain_text(content or row.get("summary", "")))})
+            if not isinstance(content, list):
+                continue
+            response = None
+            if row.get("type") == "assistant":
+                response_id = message.get("id")
+                if response_id and isinstance(message.get("usage"), dict):
+                    response = records.setdefault(response_id, {
+                        "response_id": response_id, "line": line, "usage": claude_usage(message["usage"]),
+                        "category": "text_or_other", "call_lines": [], "categories": set()})
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if row.get("type") == "assistant" and block.get("type") == "tool_use":
+                    call_id = block.get("id", str(line))
+                    if call_id in calls:
+                        continue
+                    name, inputs = block.get("name", "unknown"), block.get("input") or {}
+                    if not isinstance(inputs, dict):
+                        inputs = {}
+                    category = claude_action(name, inputs)
+                    tools[name] += 1
+                    categories[category] += 1
+                    paths = sorted(set(SKILL_PATH.findall(str(inputs.get("file_path", ""))))) if name == "Read" else []
+                    if name == "Bash":
+                        command = inputs.get("command", "")
+                        paths = sorted(set(SKILL_PATH.findall(command))) if re.search(r"\b(cat|sed|head|tail)\b", command) else []
+                        digest = hashlib.sha256(command.encode("utf-8")).hexdigest()
+                        repeated = commands.setdefault(digest, {"sha256": digest, "count": 0, "lines": []})
+                        repeated["count"] += 1
+                        if len(repeated["lines"]) < 5:
+                            repeated["lines"].append(line)
+                    read = None
+                    if paths or name == "Skill":
+                        read = {"line": line, "skill_paths": paths, "visible_skill_output": False}
+                        skill_reads.append(read)
+                    calls[call_id] = {"line": line, "category": category, "read": read}
+                    if response is not None:
+                        response["call_lines"].append(line)
+                        response["categories"].add(category)
+                elif row.get("type") == "user" and block.get("type") == "tool_result":
+                    call = calls.get(block.get("tool_use_id"), {})
+                    result = block.get("content", "")
+                    text = plain_text(result)
+                    images = sum(len(b.get("source", {}).get("data", "")) for b in result
+                                 if isinstance(b, dict) and b.get("type") == "image"
+                                 and isinstance(b.get("source"), dict)) if isinstance(result, list) else 0
+                    outputs.append({"line": line, "call_line": call.get("line"),
+                                    "category": call.get("category", "unknown_tool"),
+                                    "chars": len(text) + images, "image_base64_chars": images,
+                                    "truncated": bool(re.search(r"truncated output|tokens truncated|output truncated", text, re.I))})
+                    read = call.get("read")
+                    if read is not None and not block.get("is_error"):
+                        skill_content = output_text(result)
+                        if re.search(r"(?m)^name:\s*\S+", skill_content) and "description:" in skill_content:
+                            read.update(visible_skill_output=True, output_line=line)
+
+    totals, grouped = Counter(), defaultdict(Counter)
+    for record in records.values():
+        kinds = record.pop("categories")
+        record["category"] = next(iter(kinds)) if len(kinds) == 1 else ("mixed_tools" if kinds else "text_or_other")
+        totals.update(record["usage"])
+        grouped[record["category"]].update(record["usage"])
+        grouped[record["category"]]["responses"] += 1
+        record["usage"]["reasoning_output_tokens"] = None
+    totals["reasoning_output_tokens"] = None
+    for counts in grouped.values():
+        counts["reasoning_output_tokens"] = None
+    inputs = [r["usage"]["input_tokens"] for r in records.values()]
+    # Spilled output is counted by directory entries only; never open those files.
+    spilled = sum(1 for p in (path.with_suffix("") / "tool-results").rglob("*") if p.is_file())
+    image_outputs = sum(bool(o["image_base64_chars"]) for o in outputs)
+    notes = ["Action-attributed tokens describe emitted actions, not proven waste or billing.",
+             "Claude input includes cache reads and cache creation; reasoning tokens are unavailable.",
+             "Compaction rows are counted; their API usage is not separately identified.",
+             "Image output sizes use base64 length; {} image outputs. Spilled tool-result files: {} (contents not read).".format(image_outputs, spilled)]
+    if malformed:
+        notes.append("{} malformed JSON lines skipped; evidence may be incomplete.".format(malformed))
+    return {"format": "claude_code", "session_id": identity, "path": str(path),
+            "parent_thread_id": None, "forked_from_id": None, "method": "unique_response_usage",
+            "usage": dict(totals), "responses": len(records), "foreign_usage_records_ignored": 0,
+            "tool_calls": dict(tools), "nested_tool_references": {}, "call_categories": dict(categories),
+            "action_attributed_usage": dict(grouped), "compactions": compactions,
+            "input_context_tokens": {"first": inputs[0], "median": statistics.median(inputs), "max": max(inputs)} if inputs else {},
+            "tool_output_chars": sum(o["chars"] for o in outputs),
+            "truncated_outputs": sum(o["truncated"] for o in outputs),
+            "largest_outputs": sorted(outputs, key=lambda o: o["chars"], reverse=True)[:5],
+            "image_outputs": image_outputs, "spilled_tool_result_files": spilled,
+            "repeated_commands": sorted((c for c in commands.values() if c["count"] > 1),
+                                        key=lambda c: (-c["count"], c["sha256"]))[:5],
+            "instruction_references": [], "skill_read_attempts": skill_reads,
+            "response_usage": list(records.values()), "notes": notes}
+
+
+def analyze_codex(path):
     meta = metadata(path)
     identity = meta["id"]
     inherited = bool(meta.get("forked_from_id") or meta.get("history_base"))
@@ -265,7 +442,7 @@ def analyze(path):
         notes.append("Initial cumulative counter omitted: inherited baseline is uncertain; totals are observed deltas only.")
     if malformed:
         notes.append("{} malformed JSON lines skipped; evidence may be incomplete.".format(malformed))
-    return {"session_id": identity, "path": str(path), "parent_thread_id": meta.get("parent_thread_id"),
+    return {"format": "codex", "session_id": identity, "path": str(path), "parent_thread_id": meta.get("parent_thread_id"),
             "forked_from_id": meta.get("forked_from_id"), "method": "unique_response_usage" if records else "token_count_fallback",
             "usage": dict(totals), "responses": len(records), "foreign_usage_records_ignored": foreign,
             "tool_calls": dict(tools), "nested_tool_references": dict(nested_tools), "call_categories": dict(categories),
@@ -285,8 +462,10 @@ def audit(root, sessions_dir, children="none"):
     for report in reports:
         for record in report["response_usage"]:
             if record["response_id"] not in seen:
-                combined.update(record["usage"])
+                combined.update({k: v for k, v in record["usage"].items() if v is not None})
                 seen.add(record["response_id"])
+    if any(r["format"] == "claude_code" for r in reports):
+        combined["reasoning_output_tokens"] = None
     return {"scope": children, "sessions": reports, "combined_unique_response_usage": dict(combined),
             "combined_usage_excludes_fallback_sessions": any(r["method"] == "token_count_fallback" for r in reports)}
 
@@ -295,9 +474,14 @@ def summary(report):
     lines = ["Session audit: {} session(s); child scope={}".format(len(report["sessions"]), report["scope"])]
     for session in report["sessions"]:
         counts = session["usage"]
-        lines.append("{} [{}]".format(session["session_id"], session["method"]))
-        lines.append("  Tokens: input={:,} (cached={:,}, uncached={:,}); output={:,} (reasoning subset={:,}); total={:,}".format(
-            *(counts.get(k, 0) for k in ("input_tokens", "cached_input_tokens", "uncached_input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens"))))
+        lines.append("{} [{}; format={}]".format(session["session_id"], session["method"], session["format"]))
+        reasoning = counts.get("reasoning_output_tokens", 0 if session["format"] == "codex" else None)
+        lines.append("  Tokens: input={:,} (cached={:,}, uncached={:,}); output={:,} (reasoning subset={}); total={:,}".format(
+            counts.get("input_tokens", 0), counts.get("cached_input_tokens", 0), counts.get("uncached_input_tokens", 0),
+            counts.get("output_tokens", 0), "unavailable" if reasoning is None else "{:,}".format(reasoning), counts.get("total_tokens", 0)))
+        if session["format"] == "claude_code":
+            lines.append("  Cache creation input={:,}; repeated Bash command lines: {}".format(
+                counts.get("cache_creation_input_tokens", 0), [c["lines"] for c in session["repeated_commands"]]))
         lines.append("  Responses={}; tool calls={}; output chars={:,}; truncated={}; compactions={} (owned usage={})".format(
             session["responses"], sum(session["tool_calls"].values()), session["tool_output_chars"], session["truncated_outputs"],
             len(session["compactions"]), sum(c["owned_usage"] for c in session["compactions"])))
@@ -325,11 +509,12 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--session", required=True, help="Session ID (unique filename prefix accepted) or JSONL path")
     parser.add_argument("--sessions-dir", type=Path, default=Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "sessions")
+    parser.add_argument("--claude-projects-dir", type=Path, default=claude_projects_dir())
     parser.add_argument("--include-children", choices=("direct", "recursive"), default="none")
     parser.add_argument("--output", type=Path, help="Explicit destination for metrics JSON; contains no transcript text")
     args = parser.parse_args(argv)
     try:
-        root = find_session(args.session, args.sessions_dir.expanduser())
+        root = find_session(args.session, args.sessions_dir.expanduser(), args.claude_projects_dir.expanduser())
         report = audit(root, args.sessions_dir.expanduser(), args.include_children)
         if args.output:
             if args.output.expanduser().resolve() in {Path(r["path"]).resolve() for r in report["sessions"]}:

@@ -1,9 +1,9 @@
 ---
-name: audit-codex-session
-description: Audit a long Codex session for obvious token inefficiencies that existing skills or small reusable helpers could address. Use for retrospective session-efficiency reviews.
+name: audit-session
+description: Audit a long Codex or Claude Code session for obvious token inefficiencies that existing skills or small reusable helpers could address. Use for retrospective session-efficiency reviews.
 ---
 
-# Audit Codex Session
+# Audit Session
 
 Find the highest-confidence workflow improvements supported by the session.
 Keep the audit smaller than the work it evaluates; propose changes unless the
@@ -19,18 +19,26 @@ ask for its identity if ambiguous rather than choosing the newest file silently.
 python3 <skill-directory>/scripts/audit_session.py --session <id-or-path>
 ```
 
-Use `--sessions-dir <directory>` to override `$CODEX_HOME/sessions` or
-`~/.codex/sessions`. Scope defaults to that session only. Add
-`--include-children direct` or `--include-children recursive` when child work is
-part of the requested audit. `--output <file.json>` optionally saves metrics.
-The helper streams logs, prints a compact summary and line references, and
-does not export transcripts or generated reasoning.
+The helper detects Codex rollouts and Claude Code transcripts. Codex defaults
+to `$CODEX_HOME/sessions` or `~/.codex/sessions` (`--sessions-dir` override);
+Claude defaults to `$CLAUDE_CONFIG_DIR/projects` or `~/.claude/projects`
+(`--claude-projects-dir` override). Ambiguous IDs require an exact path.
+Scope defaults to that session only. Add `--include-children direct` or
+`--include-children recursive` for Codex child threads or Claude subagent
+transcripts under `<session-id>/subagents/`. `--output <file.json>` optionally
+saves metrics. The helper streams logs, prints bounded metrics and line
+references, and does not export transcript bodies or reasoning/thinking text.
+Spilled Claude tool results are counted without reading their contents.
 
 ## Interpret and propose
 
-- Own response IDs are deduplicated, including owned compaction usage. Cached
-  input is part of input; reasoning is part of output. Never sum inherited
-  thread totals. Counter-only fallback and missing evidence limit conclusions.
+- Response IDs are deduplicated: Codex owns response/compaction usage; Claude
+  splits one `message.id` across rows. Never sum inherited thread totals.
+  Counter-only fallback and missing evidence limit conclusions.
+- Cached input is part of input. Claude cache reads often dominate input;
+  cache creation is reported separately. Claude records no reasoning count
+  (unavailable); Codex reasoning is a subset of output. Claude compaction rows
+  are counted without claiming separately identified compaction API usage.
 - Action categories are heuristics and their tokens are **action-attributed**,
   not proven waste, billable cost, or guaranteed savings. Check a few referenced
   calls and outputs before making causal claims; avoid full transcript reads.

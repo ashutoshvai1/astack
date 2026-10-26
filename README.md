@@ -33,12 +33,12 @@ any particular research repository or model framework.
 | [`log-experiment`](skills/log-experiment/SKILL.md) | Interpret results or failures, reconcile evidence, and update relevant devlog synthesis. |
 | [`estimate-time`](skills/estimate-time/SKILL.md) | Get a quick ETA and decide whether monitoring can pause. |
 | [`validate-integrate-worktree`](skills/validate-integrate-worktree/SKILL.md) | Validate scoped code and evidence, then complete requested integration. |
-| [`audit-codex-session`](skills/audit-codex-session/SKILL.md) | Measure a long session and identify obvious token inefficiencies addressable through skills or helpers. |
+| [`audit-session`](skills/audit-session/SKILL.md) | Measure a long Codex or Claude Code session and identify obvious token inefficiencies addressable through skills or helpers. |
 
 For example: `$experiment-preflight assess this hypothesis and ask me about
 unresolved scope and gates before preparing the experiment.` The preparation,
 supervision, logging, and integration skills require explicit invocation;
-`estimate-time` and `audit-codex-session` also support automatic selection.
+`estimate-time` and `audit-session` also support automatic selection.
 Only live Slurm snapshots require Slurm.
 
 ## Helpers
@@ -57,9 +57,10 @@ its inputs and examples.
   Supply a trusted project environment with `--env-script`
   when needed; pass literal arguments after `--`. It grants no execution or
   resource authorization; `passed` means command exit zero, not a scientific gate.
-- `audit-codex-session/scripts/audit_session.py` summarizes recorded token usage
-  and likely sources of repeated work without dumping the transcript. Child
-  scope is optional; cached input is distinguished from newly generated output.
+- `audit-session/scripts/audit_session.py` detects Codex and Claude Code logs,
+  summarizes recorded token usage, and identifies likely sources of repeated
+  work without dumping the transcript. Child scope is optional; cached input
+  is distinguished from newly generated output.
 
 Use explicit supervision invocation in launch/resume requests. Preserve the
 heartbeat deadline through short waits and follow the active runtime's waiting
